@@ -1,7 +1,52 @@
 [project]
-name = "dload"
+# PyPI distribution name; the import stays `import dload` ("dload" was taken)
+name = "dload-ml"
 version = "0.1.0"
-description = "Add your description here"
+description = "Dataset management, storage, caching and streaming for ML training"
 readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Dmitrii Mukhutdinov", email = "flyingleafe@gmail.com" }]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "boto3>=1.43.40",
+    "click>=8.4.2",
+    "msgpack>=1.2.1",
+]
+
+[project.urls]
+Repository = "https://github.com/flyingleafe/dload"
+
+[project.scripts]
+dload = "dload.cli:main"
+
+[dependency-groups]
+dev = [
+    "numpy>=2.5.0",
+    "pillow>=12.3.0",
+    "pytest>=9.1.1",
+    "soundfile>=0.14.0",
+    "torch>=2.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dload"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: tests that talk to real R2 (need .env credentials)"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.basedpyright]
+typeCheckingMode = "standard"
+include = ["src", "tests", "examples"]

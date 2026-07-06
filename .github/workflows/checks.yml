@@ -31,8 +31,16 @@ jobs:
       - name: uv sync
         # the devshell shellHook also syncs, but non-fatally — do it as an
         # explicit step so a failed download fails HERE, not as 89 bogus
-        # missing-import errors in basedpyright
-        run: nix develop --command uv sync
+        # missing-import errors in basedpyright. Retried because the
+        # pytorch index CDN intermittently fails TLS from GitHub runners;
+        # after one success the torch wheel lives in the uv cache.
+        run: |
+          for i in 1 2 3; do
+            nix develop --command uv sync && exit 0
+            echo "uv sync failed (attempt $i), retrying in 30s..."
+            sleep 30
+          done
+          exit 1
 
       - name: basedpyright
         run: nix develop --command basedpyright

@@ -34,7 +34,7 @@ fails if any of them do.
 | `src/dload/torch.py` | `PipelineDataset` adapter (imports torch; rest of lib is torch-free) |
 | `src/dload/cli.py` | click CLI |
 | `tests/helpers.py` | `build_repo`, seeded sample generators, `SlowLocalRemote` |
-| `examples/` | 8 library-usage examples; `training/` 12 real training runs; `bench/` 4 benchmarks |
+| `examples/` | 9 library-usage examples; `training/` 12 real training runs; `bench/` 4 benchmarks |
 
 ## Invariants — do not break
 
@@ -71,7 +71,7 @@ fails if any of them do.
   (`errors.py`); programmer errors (bad arguments) raise `ValueError` —
   deliberate split, don't "fix" it.
 - **Combinator substrate**: `map/filter/batch/take/concat/scan/flat_map/
-  window/zip_with/select/through` are all `TransformNode(children, fn)` —
+  window/zip_with/select/star_map/through` are all `TransformNode(children, fn)` —
   one place opens/closes child streams (`.close()` propagation lives there,
   nowhere else). `fn` must be a module-level function or `functools.partial`
   over one (DataLoader spawn pickling). Only `SourceNode`/`ShuffleNode`

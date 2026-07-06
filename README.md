@@ -126,7 +126,7 @@ ds.samples().shuffle(full=True)       # true uniform permutation
 ```
 
 Streams compose through a small combinator core — `scan`, `flat_map`,
-`zip_with`, `select`, `window`, `through` — plus `dload.from_iterable`
+`zip_with`, `select`, `through` — plus `dload.from_iterable`
 (lift any iterable, e.g. a generative model, into the DAG),
 `dload.random_stream` (randomness as a stream), and derived combinators
 like `dload.choice(pipes, p)` where `p` can itself be a Pipeline (selection
@@ -154,8 +154,9 @@ downloads, exact coverage per epoch.
 Every script in [`examples/`](examples/) has been run for real against an
 R2 bucket — synthetic lab audio, a public dataset ingested via a preserved
 recipe, feature pipelines, mixing + augmentation, a small cache streaming a
-much larger dataset, torch DataLoaders, versioning/pinning, and a full CLI
-walkthrough. Start with [`examples/README.md`](examples/README.md).
+much larger dataset, torch DataLoaders, versioning/pinning, the combinator
+core end-to-end, and a full CLI walkthrough. Start with
+[`examples/README.md`](examples/README.md).
 
 ## Docs
 

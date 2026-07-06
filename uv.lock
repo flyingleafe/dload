@@ -128,8 +128,6 @@ dev = [
     { name = "pillow" },
     { name = "pytest" },
     { name = "soundfile" },
-]
-examples = [
     { name = "torch", version = "2.12.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.12.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
 ]
@@ -147,8 +145,8 @@ dev = [
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "soundfile", specifier = ">=0.14.0" },
+    { name = "torch", specifier = ">=2.4", index = "https://download.pytorch.org/whl/cpu" },
 ]
-examples = [{ name = "torch", specifier = ">=2.4", index = "https://download.pytorch.org/whl/cpu" }]
 
 [[package]]
 name = "filelock"

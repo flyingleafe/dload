@@ -5,9 +5,8 @@ persistent_workers, all without touching the network.
 decode()/collate() are module-level functions (not closures/lambdas) so they
 pickle cleanly when the DataLoader spawns worker processes.
 
-torch is intentionally not a dev dependency (unreliable pytorch wheel CDN in
-CI) — this whole module skips itself when torch is absent. Install it with
-`uv sync --group examples` to run these tests.
+This module skips itself when torch is absent, so the rest of the suite
+runs in torch-free environments.
 """
 
 # ruff: noqa: E402
@@ -19,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-pytest.importorskip("torch", reason="torch not installed (uv sync --group examples)")
+pytest.importorskip("torch", reason="torch not installed")
 
 import torch
 import torch.utils.data as tud

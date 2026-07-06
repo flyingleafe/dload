@@ -20,17 +20,11 @@ Repository = "https://github.com/flyingleafe/dload"
 dload = "dload.cli:main"
 
 [dependency-groups]
-# torch is deliberately NOT in dev: the pytorch wheel CDN is unreliable from
-# CI, and only the torch adapter tests + examples need it. CI and the
-# publish pipeline run torch-free (tests/test_torch.py skips itself, torch
-# users are excluded from basedpyright). Locally: uv sync --group examples
 dev = [
     "numpy>=2.5.0",
     "pillow>=12.3.0",
     "pytest>=9.1.1",
     "soundfile>=0.14.0",
-]
-examples = [
     "torch>=2.4",
 ]
 
@@ -56,14 +50,3 @@ explicit = true
 [tool.basedpyright]
 typeCheckingMode = "standard"
 include = ["src", "tests", "examples"]
-# torch importers are unchecked while torch is out of the dev venv (see
-# the dependency-groups note); drop these when torch returns to dev
-exclude = [
-    "src/dload/torch.py",
-    "tests/test_torch.py",
-    "examples/06_torch_dataloader.py",
-    "examples/training",
-    "examples/bench/b01_audio_streaming_bench.py",
-    "examples/bench/b02_text_tokenpack_bench.py",
-    "examples/bench/b04_vision_jpeg_bench.py",
-]

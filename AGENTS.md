@@ -34,7 +34,7 @@ fails if any of them do.
 | `src/dload/torch.py` | `PipelineDataset` adapter (imports torch; rest of lib is torch-free) |
 | `src/dload/cli.py` | click CLI |
 | `tests/helpers.py` | `build_repo`, seeded sample generators, `SlowLocalRemote` |
-| `examples/` | 9 library-usage examples; `training/` 12 real training runs; `bench/` 4 benchmarks |
+| `examples/` | 10 library-usage examples; `training/` 12 real training runs; `bench/` 4 benchmarks |
 
 ## Invariants — do not break
 
@@ -89,6 +89,16 @@ fails if any of them do.
 - **`.maybe` must stay zip-based**: implementing it as
   `choice([pipe.map(fn), pipe])` opens the same upstream twice — desyncs
   order and double-reads shards, breaking the N-GETs invariant.
+- **Derived datasets**: `Repository.derive(name, pipeline)` memoizes a
+  pipeline's output at `datasets/<name>/derived/<fingerprint>` — a normal
+  committed dataset plus that one extra ref, found by any consumer whose
+  pipeline hashes to the same fingerprint instead of recomputing.
+  `Pipeline.fingerprint()` enforces determinism (raises `ValueError` on
+  unseeded shuffle/mix/random_stream/choice/`.maybe`, unbounded `.repeat()`,
+  or lambda/local transforms) and tracks transform functions by
+  module+qualname, not source — bump `tag=` (or rename) when a transform's
+  implementation changes without its name changing, or `derive` silently
+  hands back the stale snapshot.
 
 ## Testing conventions
 

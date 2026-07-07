@@ -260,7 +260,102 @@ Committing new data under an existing name creates a new version; unchanged
 shards are shared, `refs/latest` moves, pinned projects are unaffected until
 you re-pin. (`repo.pin`/`unpin`/`versions` do the same from Python.)
 
-## 8. Will it feed my GPUs?
+## 8. Derived datasets: compute once, stream everywhere
+
+Some preprocessing is expensive and wanted by everyone who touches the
+data — tokenizing a text corpus, extracting log-mel features from audio,
+resampling to a target rate. `Repository.derive` runs that work once and
+shares the result: the first caller pays for it, everyone else — any
+machine, any time later — streams the finished snapshot instead of
+recomputing.
+
+```python
+import numpy as np
+from dload import codecs
+
+raw = repo.dataset("tinystories-raw")            # committed text chunks
+
+def tokenize_chunk(sample: tuple[str, dict[str, bytes]]) -> tuple[str, dict[str, bytes]]:
+    key, fields = sample                          # module-level: fingerprinted by name
+    ids = np.asarray(tokenizer.encode(codecs.text_from(fields["text"])), dtype=np.int32)
+    return key, {"tokens": codecs.npy_bytes(ids)}  # re-encoded to storable bytes
+
+pipe = raw.samples().map(tokenize_chunk)
+tokenized = repo.derive("tinystories-tokenized", pipe)   # a Dataset, same as repo.dataset(...)
+```
+
+What happens: `derive` computes `pipe.fingerprint()` — a sha256 of the
+source dataset's resolved version, the transform DAG shape, and
+`tokenize_chunk`'s module + qualname (never its bytecode) — and looks it
+up at `datasets/tinystories-tokenized/derived/<fingerprint>`. Not found →
+it runs `pipe` once, commits the yielded samples as a new version of
+`tinystories-tokenized` (ordinary content-addressed shards, deduped
+against everything already stored), and publishes the ref.
+
+A second machine — a different training run, a teammate, a slurm job that
+starts an hour later — builds the *identical* pipeline (same source
+version, same `tokenize_chunk`, same parameters) and calls the same
+`repo.derive("tinystories-tokenized", pipe)`. Same fingerprint, ref
+already published → it gets the snapshot back immediately, streamed shard
+by shard, no re-tokenizing. `tokenized` is a completely ordinary
+`Dataset`: it shows up in `dload ls`, has versions, streams with the usual
+N-shards-N-GETs efficiency, and its shards are gc-protected like any other
+dataset's.
+
+If two machines race to be first, both compute the same shards
+(determinism means byte-identical output), both dedup by content, and
+whichever publishes the ref first wins — the other silently adopts it. No
+lock, no coordination needed.
+
+**The pipeline must be finite and deterministic.** `derive` (via
+`pipe.fingerprint()`) refuses anything that can't be given a stable
+identity:
+
+```python
+>>> repo.derive("noisy", ds.samples().shuffle(4096).map(decode))
+ValueError: derive requires an explicit seed on .shuffle() so the result is
+reproducible; an unseeded stream draws fresh entropy and cannot be
+memoized. Pass seed=...
+```
+
+Same story for unseeded `mix()`/`random_stream()`/`choice()`/`.maybe()`,
+`.repeat()` with no count, and lambdas or locally-defined functions passed
+to `map`/`filter`/etc. The fix is always the same shape: `.shuffle(4096,
+seed=0)`, `.repeat(3)`, a module-level `def` instead of a lambda.
+
+**What can go through `derive`:** anything that ends up as `(key, {field:
+bytes})` — the same contract as `commit`. That means decode → transform →
+*re-encode to bytes*, not decode → return a live Python object: tokenize
+text and store token-id arrays, extract mel-spectrograms and store `.npy`
+bytes, resample audio and store the resampled WAV, filter/subset/shuffle a
+dataset and store the surviving samples. Downstream consumers then just
+decode the (already cheap) stored bytes — the expensive step happened
+once, upstream.
+
+**Escape hatch for changed implementations.** The fingerprint tracks
+transform functions **by name**, not by source code — edit
+`tokenize_chunk`'s body without renaming it, and `derive` still finds the
+old ref and hands back the stale snapshot. Force a fresh identity with
+`tag`:
+
+```python
+tokenized_v2 = repo.derive("tinystories-tokenized", pipe, tag="v2-bpe")
+```
+
+(or give the derived dataset a new `name` altogether). `tag` is mixed into
+the fingerprint verbatim and must be JSON-serializable.
+
+Inspect what a derived pipeline actually depends on before running it:
+
+```python
+pipe.source_versions()   # {"tinystories-raw": "3f2ab1..."} — upstream deps
+pipe.fingerprint()        # the sha256 identity itself, if you want to log it
+```
+
+As with `commit`, don't run `derive` concurrently with `gc()` — shards
+committed before the ref is published can look orphaned mid-collection.
+
+## 9. Will it feed my GPUs?
 
 [BENCHMARKS.md](BENCHMARKS.md) measures full pipelines on a deliberately weak
 2-core box against FLOPs-derived feed rates for 0.1–0.5B models on 1–4 H100s.

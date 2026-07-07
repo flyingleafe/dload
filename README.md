@@ -134,6 +134,12 @@ probability varying over iteration). See the combinators section of
 [TUTORIAL.md](TUTORIAL.md) and
 [`examples/09_combinators.py`](examples/09_combinators.py).
 
+Expensive, shared preprocessing (tokenization, feature extraction,
+resampling) can be memoized instead of repeated: `repo.derive(name, pipe)`
+runs a finite, deterministic pipeline once, commits its output as a normal
+dataset, and hands that same snapshot to every other caller of the
+identical pipeline — see "Derived datasets" (§8) in [TUTORIAL.md](TUTORIAL.md).
+
 PyTorch:
 
 ```python

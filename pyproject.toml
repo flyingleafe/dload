@@ -1,7 +1,7 @@
 [project]
 # PyPI distribution name; the import stays `import dload` ("dload" was taken)
 name = "dload-ml"
-version = "0.1.0"
+version = "0.2.0"
 description = "Dataset management, storage, caching and streaming for ML training"
 readme = "README.md"
 license = { text = "MIT" }

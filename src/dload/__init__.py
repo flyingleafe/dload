@@ -47,7 +47,7 @@ from .pipeline import (
 from .pipeline import zip_streams as zip  # noqa: A004 — deliberate: dload.zip
 from .repo import Dataset, Repository
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "CacheFullError",

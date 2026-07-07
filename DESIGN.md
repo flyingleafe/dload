@@ -24,6 +24,7 @@ sliding-window LRU).
 ```
 datasets/<name>/manifests/<version>.json    # immutable
 datasets/<name>/refs/latest                 # text file: current version id
+datasets/<name>/derived/<fingerprint>       # text file: version id (derived datasets)
 shards/<aa>/<digest>                        # content-addressed, shared
 ```
 
@@ -72,6 +73,46 @@ layer (`map`, `filter`, `batch`, `window`, `choice`, `maybe`, ...) that is
 thin wrappers or pure composition — e.g. `choice` = `select` over an index
 stream computed by `zip_with` from `random_stream` and a (possibly
 stream-valued) probability.
+
+## Derived datasets
+
+Some pipelines are expensive and shared by many consumers — tokenization,
+feature extraction, resampling. `Repository.derive(name, pipeline)`
+memoizes the *result* of running a pipeline, not just its inputs: it
+commits the pipeline's output as an ordinary dataset version, keyed by a
+fingerprint of what produced it, so the second caller — any machine, any
+time later — gets the snapshot instead of recomputing it.
+
+Identity is structural, not textual. `Pipeline.fingerprint()` sha256-hashes
+a canonical JSON encoding of the source datasets' resolved versions, the
+transform DAG shape, each transform function's module + qualname (never
+its source), and every explicit parameter including seeds. Two pipelines
+that would produce byte-identical output in byte-identical order — and
+only those — hash the same. `derive` looks up
+`datasets/<name>/derived/<fingerprint>`: present → return that version's
+`Dataset` untouched, no I/O beyond the ref read; absent → run the pipeline
+once, `commit` its samples as a new version of `name`, and publish the ref
+pointing at it.
+
+Determinism is a precondition, not a convenience: fingerprinting raises
+`ValueError` on anything that can't be assigned a stable identity — an
+unseeded `shuffle`/`mix`/`random_stream`/`choice`/`.maybe` (fresh entropy
+each run), an unbounded `.repeat()` (never terminates), or a lambda/local
+transform (no cross-process identity). Reject first, don't memoize a lie.
+A `tag` parameter is mixed into the hash verbatim, for the one case
+structure can't see: an implementation change behind an unrenamed function.
+
+Concurrency needs no coordination because everything downstream of the
+fingerprint is already content-addressed: two machines racing to compute
+the same derivation produce byte-identical shards (dedup for free) and
+each tries to publish the same ref; the loser detects the winner's version
+already there and adopts it instead of overwriting.
+
+A derived dataset is not a separate concept from a committed one — it's a
+normal manifest/version/shard set with one extra pointer (the derivation
+ref) that lets *discovery* work by recomputing a fingerprint instead of
+remembering a version id. `ls`, `gc`, pinning, and the N-GETs streaming
+path all apply unmodified.
 
 ## Modules
 

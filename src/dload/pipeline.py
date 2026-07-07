@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import json
 import logging
 import random
 from collections import OrderedDict, deque
@@ -715,6 +716,40 @@ class Pipeline:
         """Dry-run the feasibility check without touching storage."""
         return self._plan(epoch=self._epochs)[2]
 
+    # -- derivation identity --------------------------------------------------
+
+    def source_versions(self) -> dict[str, str]:
+        """The committed datasets this pipeline reads, as `{name: version}` —
+        the upstream dependency set that (together with the transform DAG)
+        determines a derived dataset's identity."""
+        node_ids: dict[Node, int] = {}
+        found: list[tuple[SourceNode, ShuffleNode | None]] = []
+        _walk(self._node, node_ids, None, found)
+        return {s.dataset.name: s.dataset.version for s, _ in found}
+
+    def fingerprint(self, *, tag: object = None) -> str:
+        """A stable sha256 identity for the *finite, deterministic* stream this
+        pipeline produces — a pure function of its source dataset versions, DAG
+        structure, transform functions (by module + qualname), and every
+        explicit parameter (seeds included). Two pipelines with the same
+        fingerprint yield byte-identical samples in the same order, so the
+        result can be materialized once and shared (see `Repository.derive`).
+
+        `tag` is mixed in verbatim (must be JSON-serializable): use it to force
+        a fresh identity when you change a transform's *implementation* without
+        renaming it — the fingerprint tracks functions by name, not by source.
+
+        Raises `ValueError` if the pipeline is not reproducible: an unseeded
+        `shuffle`/`mix`/`random_stream`/`choice`/`.maybe`, an endless
+        `.repeat()`, or a non-module-level (lambda/local) transform. Those have
+        no stable identity and must not be memoized as if they did.
+        """
+        structure = [_DERIVE_FINGERPRINT_VERSION, _fingerprint_node(self._node)]
+        if tag is not None:
+            structure.append(_fingerprint_value(tag))
+        canonical = json.dumps(structure, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
     # -- execution -------------------------------------------------------------
 
     def __iter__(self) -> Generator[Any, None, None]:
@@ -850,3 +885,115 @@ def choice(
         _choice_index(n, p, 0.0)  # validate the static spec now, not mid-epoch
         index = r.map(partial(_choice_index, n, p))
     return select(index, *pipelines)
+
+
+# --------------------------------------------------------------------------
+# derivation fingerprint
+#
+# A canonical, worker-independent structural digest of the DAG. It answers
+# "does this pipeline produce exactly the same finite stream as that one?" so
+# a derived dataset can be materialized once and shared. Bump this when the
+# canonical form changes, so old and new fingerprints never collide.
+
+_DERIVE_FINGERPRINT_VERSION = 1
+
+
+def _require_seed(seed: int | None, what: str) -> int:
+    if seed is None:
+        raise ValueError(
+            f"derive requires an explicit seed on {what} so the result is "
+            "reproducible; an unseeded stream draws fresh entropy and cannot "
+            "be memoized. Pass seed=..."
+        )
+    return seed
+
+
+def _fn_identity(fn: object) -> object:
+    """Identity of a callable by module + qualname. Refuses lambdas and
+    locally-defined functions — they have no stable cross-process identity
+    (and the worker-pickling contract already forbids them)."""
+    if isinstance(fn, partial):
+        return _fingerprint_value(fn)
+    qualname = getattr(fn, "__qualname__", None)
+    if not isinstance(qualname, str):
+        raise ValueError(
+            f"derive cannot fingerprint {fn!r}: no stable qualified name. "
+            "Transforms must be module-level functions or functools.partial "
+            "over them."
+        )
+    if "<lambda>" in qualname or "<locals>" in qualname:
+        raise ValueError(
+            f"derive cannot fingerprint {qualname!r}: lambdas and locally "
+            "defined functions have no stable identity. Use a module-level "
+            "function (see the combinator-substrate note in CLAUDE.md)."
+        )
+    return ["fn", getattr(fn, "__module__", None), qualname]
+
+
+def _fingerprint_value(v: object) -> object:
+    """Canonicalize an arbitrary pipeline parameter to a JSON-able structure.
+    Callables collapse to their module+qualname identity; bytes to a digest;
+    containers recurse. Anything else (numpy arrays, opaque objects) raises —
+    an un-fingerprintable parameter means the stream is not reproducibly
+    identifiable and must not be memoized."""
+    if v is None or isinstance(v, (bool, int, float, str)):
+        return v
+    if isinstance(v, bytes):
+        return ["bytes", hashlib.sha256(v).hexdigest()]
+    if isinstance(v, partial):
+        return [
+            "partial",
+            _fn_identity(v.func),
+            [_fingerprint_value(a) for a in v.args],
+            [[k, _fingerprint_value(val)] for k, val in sorted(v.keywords.items())],
+        ]
+    if isinstance(v, (list, tuple, range)):
+        return ["seq", [_fingerprint_value(x) for x in v]]
+    if isinstance(v, dict):
+        items = sorted(v.items(), key=lambda kv: str(kv[0]))
+        return ["dict", [[str(k), _fingerprint_value(val)] for k, val in items]]
+    if callable(v):
+        return _fn_identity(v)
+    raise ValueError(
+        f"derive cannot fingerprint a value of type {type(v).__name__}: no "
+        "stable canonical form. Pass a module-level factory function instead."
+    )
+
+
+def _node_params(node: Node) -> dict[str, object]:
+    if isinstance(node, SourceNode):
+        # prefetch is a cache-window depth, not part of the produced stream.
+        return {"name": node.dataset.name, "version": node.dataset.version}
+    if isinstance(node, ShuffleNode):
+        seed = _require_seed(node.seed, ".shuffle()")
+        if node.full:
+            return {"seed": seed, "full": True}
+        return {"buffer_size": node.buffer_size, "seed": seed, "full": False}
+    if isinstance(node, RepeatNode):
+        if node.times is None:
+            raise ValueError(
+                "derive requires a finite pipeline; .repeat() with no count "
+                "never terminates. Pass .repeat(n)."
+            )
+        return {"times": node.times}
+    if isinstance(node, MixNode):
+        return {
+            "weights": [float(w) for w in node.weights],
+            "seed": _require_seed(node.seed, "mix()"),
+            "until": node.until,
+        }
+    if isinstance(node, RandomNode):
+        return {"seed": _require_seed(node.seed, "random_stream()/choice()/.maybe()")}
+    if isinstance(node, IterableSourceNode):
+        return {"source": _fingerprint_value(node.source), "shard": node.shard}
+    if isinstance(node, TransformNode):
+        return {"fn": _fingerprint_value(node.fn)}
+    raise ValueError(f"derive cannot fingerprint node type {type(node).__name__}")
+
+
+def _fingerprint_node(node: Node) -> list[object]:
+    return [
+        type(node).__name__,
+        _node_params(node),
+        [_fingerprint_node(c) for c in node.children],
+    ]

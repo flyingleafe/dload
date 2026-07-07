@@ -25,6 +25,7 @@ first — `03`-`07` stream the datasets they commit.
 | [`07_versioning_pinning.py`](07_versioning_pinning.py) | A second version of a dataset under the same name, shard-level dedup across versions, and pinning/unpinning a specific version in `dload.lock`. |
 | [`08_cli_walkthrough.sh`](08_cli_walkthrough.sh) | The full `dload` CLI lifecycle — commit, ls, info, recipe, pull, pin/unpin, rm, gc, cache status/clear. |
 | [`09_combinators.py`](09_combinators.py) | Combinators over streams: `choice` between a real noise corpus and a generative model lifted via `from_iterable`, selection probability from a schedule *stream*, `zip_with` pairing, `maybe` augmentation — ratio, schedule-tracking, and bit-exact determinism all asserted. |
+| [`10_derived_datasets.py`](10_derived_datasets.py) | `repo.derive()`: memoizing a deterministic tokenization pipeline into a shared, content-addressed dataset — first call MISSes and materializes, a second (equivalently-built) call HITs the same snapshot instantly; `fingerprint()`/`source_versions()`, the `tag` escape hatch, and the `ValueError` from an unseeded `.shuffle()`. |
 
 ## Real training pipelines (`training/`)
 

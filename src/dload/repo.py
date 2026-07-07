@@ -50,6 +50,10 @@ def _ref_key(name: str) -> str:
     return f"datasets/{name}/refs/latest"
 
 
+def _derived_key(name: str, fingerprint: str) -> str:
+    return f"datasets/{name}/derived/{fingerprint}"
+
+
 class Repository:
     """A dataset store = remote (source of truth) + local shard cache."""
 
@@ -165,6 +169,73 @@ class Repository:
             pass
         finally:
             src.unlink(missing_ok=True)
+
+    # -- derived datasets ----------------------------------------------------
+
+    def derive(
+        self,
+        name: str,
+        pipeline: "Pipeline",
+        *,
+        tag: object = None,
+        target_shard_size: int = DEFAULT_SHARD_SIZE,
+        progress: Progress | None = None,
+    ) -> "Dataset":
+        """Materialize a finite, deterministic `pipeline` into a shared,
+        content-addressed derived dataset — memoization for preprocessing.
+
+        The pipeline's `fingerprint()` (its source dataset versions + transform
+        DAG + every seed/parameter) keys a *derivation ref* in the remote. On a
+        hit the snapshot already exists and is returned immediately — no
+        recomputation, just a normal `Dataset` streamed shard by shard. On a
+        miss the pipeline is run once, its samples committed as a new version of
+        `name` (shards dedup against all existing storage), and the ref
+        published so every other consumer of the same pipeline hits it.
+
+        Because materialization is deterministic, concurrent first-runs
+        converge: identical output dedups to the same shards by content, and
+        every reader after the ref settles resolves the same snapshot (a tight
+        race may leave one redundant, unreferenced manifest — never wrong data).
+
+        The pipeline must yield storable samples `(key, {field: bytes})` — the
+        packer rejects anything else. Preprocess into the encoded domain
+        (tokens, features, resampled audio) and store the bytes; decode cheaply
+        downstream. `tag` forces a fresh identity when a transform's *code*
+        changes without its name (see `Pipeline.fingerprint`).
+
+        Raises `ValueError` (via `fingerprint`) for non-reproducible pipelines.
+        Do not run concurrently with `gc()` (same caveat as `commit`).
+        """
+        say = progress or (lambda _msg: None)
+        fingerprint = pipeline.fingerprint(tag=tag)
+        ref = _derived_key(name, fingerprint)
+        try:
+            version = self.remote.get_bytes(ref).decode().strip()
+            say(f"derive {name}: hit {fingerprint[:12]} → {version[:12]}")
+            return Dataset(self, self.manifest(name, version))
+        except NotFoundError:
+            pass
+
+        say(f"derive {name}: miss {fingerprint[:12]}, materializing")
+        manifest = self.commit(
+            name,
+            pipeline,
+            meta={
+                "derived_from": pipeline.source_versions(),
+                "fingerprint": fingerprint,
+                "tag": tag,
+            },
+            target_shard_size=target_shard_size,
+            progress=progress,
+        )
+        # Adopt a concurrent winner if one raced us to the ref; otherwise
+        # publish our snapshot. Content-addressing makes either outcome safe.
+        try:
+            winner = self.remote.get_bytes(ref).decode().strip()
+        except NotFoundError:
+            self.remote.put_bytes(ref, manifest.version.encode())
+            return Dataset(self, manifest)
+        return Dataset(self, self.manifest(name, winner))
 
     # -- resolution & reads --------------------------------------------------
 

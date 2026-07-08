@@ -178,6 +178,8 @@ class Repository:
         pipeline: "Pipeline",
         *,
         tag: object = None,
+        meta: dict | None = None,
+        recipe: str | None = None,
         target_shard_size: int = DEFAULT_SHARD_SIZE,
         progress: Progress | None = None,
     ) -> "Dataset":
@@ -203,6 +205,16 @@ class Repository:
         downstream. `tag` forces a fresh identity when a transform's *code*
         changes without its name (see `Pipeline.fingerprint`).
 
+        `meta` and `recipe` are forwarded to the underlying `commit()` so a
+        derived version can carry the same manifest metadata a hand-committed
+        one would (e.g. a `layout`/`fields` key a decoder dispatches on). They
+        are merged with the reserved derivation keys `derived_from`,
+        `fingerprint` and `tag`, which always win on conflict — user `meta`
+        can never shadow them. Because the derivation ref is keyed on the
+        pipeline `fingerprint` (which does *not* include `meta`), keep `meta`
+        a deterministic function of the pipeline: the first materialization to
+        publish the ref sets the meta every later consumer resolves.
+
         Raises `ValueError` (via `fingerprint`) for non-reproducible pipelines.
         Do not run concurrently with `gc()` (same caveat as `commit`).
         """
@@ -217,14 +229,17 @@ class Repository:
             pass
 
         say(f"derive {name}: miss {fingerprint[:12]}, materializing")
+        merged_meta = {
+            **(meta or {}),
+            "derived_from": pipeline.source_versions(),
+            "fingerprint": fingerprint,
+            "tag": tag,
+        }
         manifest = self.commit(
             name,
             pipeline,
-            meta={
-                "derived_from": pipeline.source_versions(),
-                "fingerprint": fingerprint,
-                "tag": tag,
-            },
+            meta=merged_meta,
+            recipe=recipe,
             target_shard_size=target_shard_size,
             progress=progress,
         )

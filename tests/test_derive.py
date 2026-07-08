@@ -388,3 +388,41 @@ def test_derive_manifest_meta_records_fingerprint_and_source_versions(tmp_path):
     assert derived.manifest.meta["fingerprint"] == fp
     assert derived.manifest.meta["derived_from"] == source_versions
     assert derived.manifest.meta["tag"] == "meta-check"
+
+
+def test_derive_forwards_user_meta_and_recipe(tmp_path):
+    repo = build_repo(tmp_path)
+    repo.commit("src", make_samples(8, seed=40), target_shard_size=10**9)
+
+    pipe = repo.dataset("src").samples().shuffle(seed=11).map(_prefixed)
+    derived = repo.derive(
+        "derived_usermeta",
+        pipe,
+        meta={"layout": "sample-dir-v1", "fields": ["audio"]},
+        recipe="resample to 16k",
+    )
+
+    # User meta rides alongside the reserved derivation keys.
+    assert derived.manifest.meta["layout"] == "sample-dir-v1"
+    assert derived.manifest.meta["fields"] == ["audio"]
+    assert derived.manifest.recipe == "resample to 16k"
+    assert derived.manifest.meta["fingerprint"] == pipe.fingerprint()
+    assert derived.manifest.meta["derived_from"] == pipe.source_versions()
+
+
+def test_derive_reserved_meta_keys_win_over_user_meta(tmp_path):
+    repo = build_repo(tmp_path)
+    repo.commit("src", make_samples(8, seed=41), target_shard_size=10**9)
+
+    pipe = repo.dataset("src").samples().shuffle(seed=12).map(_prefixed)
+    # A malicious/careless user meta cannot shadow the reserved keys.
+    derived = repo.derive(
+        "derived_shadow",
+        pipe,
+        tag="real-tag",
+        meta={"fingerprint": "FAKE", "derived_from": {}, "tag": "fake-tag"},
+    )
+
+    assert derived.manifest.meta["fingerprint"] == pipe.fingerprint(tag="real-tag")
+    assert derived.manifest.meta["derived_from"] == pipe.source_versions()
+    assert derived.manifest.meta["tag"] == "real-tag"

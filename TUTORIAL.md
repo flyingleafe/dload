@@ -345,6 +345,21 @@ tokenized_v2 = repo.derive("tinystories-tokenized", pipe, tag="v2-bpe")
 (or give the derived dataset a new `name` altogether). `tag` is mixed into
 the fingerprint verbatim and must be JSON-serializable.
 
+**Carrying manifest metadata.** A derived version is an ordinary committed
+one, so it takes `meta=`/`recipe=` just like `commit` — pass the same keys a
+hand-committed version would (e.g. a `layout`/`fields` key your decoder
+dispatches on) and they land in the derived manifest:
+
+```python
+repo.derive("dregon-lm", pipe, meta={"layout": "sample-dir-v1", ...})
+```
+
+Your `meta` is merged with the reserved derivation keys (`derived_from`,
+`fingerprint`, `tag`), which always win on conflict. Keep `meta` a
+deterministic function of the pipeline: the ref is keyed on the fingerprint
+(not the meta), so the first materialization to publish it sets the meta
+every later consumer resolves.
+
 Inspect what a derived pipeline actually depends on before running it:
 
 ```python
